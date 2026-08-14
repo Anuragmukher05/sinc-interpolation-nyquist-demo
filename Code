@@ -1,0 +1,88 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ----------------------------------------------------------------------
+# Signal definition: two-tone signal
+# ----------------------------------------------------------------------
+f1, f2 = 1000.0, 1800.0          # Hz  (the two tones)
+f_max = max(f1, f2)
+f_nyq = 2 * f_max                # Nyquist RATE for this signal = 3600 Hz
+
+def x_cont(t):
+    return np.cos(2*np.pi*f1*t) + np.cos(2*np.pi*f2*t)
+
+# ----------------------------------------------------------------------
+# Keep "physical" sampling separate from "plotting" resolution.
+#   - fs_plot: a very dense, fixed grid used ONLY to draw a smooth
+#     stand-in for the true continuous-time signal and to evaluate the
+#     sinc reconstruction smoothly. It never represents real samples.
+#   - fs (below): the actual physical sampling rate for each case,
+#     which is what the ADC/discrete system would really use.
+# ----------------------------------------------------------------------
+fs_plot = 200_000.0               # Hz, plotting-only resolution
+T_window = 5e-3                   # 5 ms observation window
+t_plot = np.arange(0, T_window, 1/fs_plot)
+x_true = x_cont(t_plot)
+
+cases = [
+    ("Above Nyquist (oversampled)", 8000.0),
+    ("At Nyquist rate",             3600.0),
+    ("Below Nyquist (aliased)",     2500.0),
+]
+
+fig, axes = plt.subplots(3, 2, figsize=(13, 12))
+
+for row, (label, fs) in enumerate(cases):
+    Ts = 1.0 / fs
+    n = np.arange(0, T_window, Ts)          # physical sample instants
+    xn = x_cont(n)                          # physical samples
+
+    # ---- sinc (Whittaker-Shannon) reconstruction, evaluated on the
+    #      dense plotting grid, using only the physical samples ----
+    # x_hat(t) = sum_n x[n] * sinc( (t - n*Ts) / Ts )
+    x_hat = np.zeros_like(t_plot)
+    for k, tk in enumerate(n):
+        x_hat += xn[k] * np.sinc((t_plot - tk) / Ts)
+
+    # ---------------- time domain plot ----------------
+    ax = axes[row, 0]
+    ax.plot(t_plot*1e3, x_true, color='0.75', lw=1, label='true continuous signal')
+    ax.plot(t_plot*1e3, x_hat, 'b-', lw=1.2, label='sinc reconstruction')
+    ax.stem(n*1e3, xn, linefmt='r-', markerfmt='ro', basefmt=' ')
+    ax.set_xlim(0, 3)
+    ax.set_ylim(-2.3, 2.3)
+    ax.set_title(f"{label}\n$f_s$ = {fs:.0f} Hz  (Nyquist rate = {f_nyq:.0f} Hz)")
+    ax.set_xlabel("time (ms)")
+    ax.set_ylabel("amplitude")
+    if row == 0:
+        ax.legend(loc='upper right', fontsize=8)
+
+    # ---------------- frequency domain plot ----------------
+    ax2 = axes[row, 1]
+
+    # spectrum of the true (dense) reference signal, for context
+    N_plot = len(t_plot)
+    X_true = np.fft.rfft(x_true)
+    f_true = np.fft.rfftfreq(N_plot, d=1/fs_plot)
+    mag_true = np.abs(X_true) / N_plot
+    ax2.plot(f_true, mag_true, color='0.8', lw=1, label='true spectrum')
+
+    # spectrum computed from the ACTUAL physical samples
+    N = len(n)
+    X = np.fft.rfft(xn)
+    f_axis = np.fft.rfftfreq(N, d=Ts)
+    mag = np.abs(X) / N
+    ax2.stem(f_axis, mag, linefmt='b-', markerfmt='bo', basefmt=' ',
+              label='spectrum from samples')
+
+    ax2.axvline(fs/2, color='k', ls='--', lw=1, label='$f_s/2$')
+    ax2.set_xlim(0, 4000)
+    ax2.set_title("Frequency content")
+    ax2.set_xlabel("frequency (Hz)")
+    ax2.set_ylabel("magnitude")
+    if row == 0:
+        ax2.legend(loc='upper right', fontsize=8)
+
+plt.tight_layout()
+plt.savefig('sampling_demo.png', dpi=140)
+print("saved")
